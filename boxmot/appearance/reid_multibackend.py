@@ -56,6 +56,8 @@ class ReIDDetectMultiBackend(nn.Module):
         self.device = device
         self.nhwc = self.tflite  # activate bhwc --> bcwh
 
+        self.wh_input = (128, 256) # default width and height of input
+
         model_name = get_model_name(w)
 
         if w.suffix == ".pt":
@@ -156,6 +158,14 @@ class ReIDDetectMultiBackend(nn.Module):
                     Path(w).glob("*.xml")
                 )  # get *.xml file from *_openvino_model dir
             network = ie.read_model(model=w, weights=Path(w).with_suffix(".bin"))
+
+            # get width and height of input image
+            net_input_param = str(network.get_parameters()[0])
+            idx_1 = net_input_param.index('[') + 1
+            idx_2 = net_input_param.rindex(']')
+            net_input_param = net_input_param[idx_1:idx_2].split(',')
+            self.wh_input = (int(net_input_param[2]), int(net_input_param[3]))
+
             if network.get_parameters()[0].get_layout().empty:
                 network.get_parameters()[0].set_layout(Layout("NCWH"))
             self.executable_network = ie.compile_model(
@@ -195,7 +205,7 @@ class ReIDDetectMultiBackend(nn.Module):
             # resize
             crop = cv2.resize(
                 crop,
-                (128, 256),  # from (x, y) to (128, 256) | (w, h)
+                self.wh_input,  # default: from (x, y) to (128, 256) | (w, h)
                 interpolation=cv2.INTER_LINEAR,
             )
 
@@ -292,7 +302,7 @@ class ReIDDetectMultiBackend(nn.Module):
         # warmup model by running inference once
         if self.device.type != "cpu":
             im = np.random.randint(0, 255, *imgsz, dtype=np.uint8)
-            im = self.preprocess(xyxys=np.array([[0, 0, 128, 256]]), img=im)
+            im = self.preprocess(xyxys=np.array([[0, 0, self.wh_input[0], self.wh_input[1]]]), img=im)
             self.forward(im)  # warmup
 
     @torch.no_grad()
